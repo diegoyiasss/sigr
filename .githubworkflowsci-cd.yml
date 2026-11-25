@@ -1,0 +1,91 @@
+name: Pipeline CI/CD - SIGR Restaurante
+
+on:
+  push:
+    branches: [ main, feat/ci-cd-pipeline ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-lint:
+    name: 1. Construcción y Análisis Estático
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código fuente
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verificar sintaxis estática de los módulos SIGR
+        run: |
+          node --check src/app.js
+          node --check src/auth/login.js
+          node --check src/caja/reportes.js
+          node --check src/menu/crud.js
+          node --check src/pedidos/tracker.js
+          node --check src/reservas/calendar.js
+          node --check tests/sigr.test.js
+
+  automated-tests:
+    name: 2. Pruebas Unitarias, Integración y Rendimiento
+    needs: [build-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Ejecutar suite de pruebas SIGR
+        run: node --test --test-reporter=spec tests/sigr.test.js
+
+  security-scan:
+    name: 3. Validación de Seguridad (Trivy)
+    needs: [automated-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Escaneo estático de vulnerabilidades
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+  docker-package:
+    name: 4. Empaquetado con Docker
+    needs: [security-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir imagen Docker de SIGR
+        run: docker build -t sigr-restaurante:${{ github.sha }} .
+
+  deploy-staging:
+    name: 5. Despliegue Simulado en Staging
+    needs: [docker-package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Desplegar contenedor en entorno Staging
+        run: |
+          docker build -t sigr-staging:latest .
+          docker run -d --name sigr-staging-app -p 3000:3000 sigr-staging:latest
+          sleep 3
+
+      - name: Validar disponibilidad (Smoke Test HTTP)
+        run: |
+          curl -f http://localhost:3000/health
+          curl -f http://localhost:3000/api/pedidos/demo
+
+      - name: Liberar recursos de Staging
+        if: always()
+        run: docker rm -f sigr-staging-app || true
