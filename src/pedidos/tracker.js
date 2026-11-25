@@ -3,7 +3,7 @@ function registrarPedido(mesa, platos) {
     const pedido = {
         id: Math.floor(Math.random() * 1000),
         mesa: mesa,
-        estado: "Error",
+        estado: "En preparación",
         platos: platos
     };
     console.log(`Pedido #${pedido.id} registrado para la mesa ${mesa}`);
